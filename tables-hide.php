@@ -1,26 +1,46 @@
 <?php
 
 /**
- * Enable hiding tables in menu list
+ * Enable hiding tables in the left and middle panels.
  *
- * Install to Adminer on http://www.adminer.org/plugins/
  * @author Pavel Kutáč, http://www.kutac.cz/
- *
- * Filter inspiration by Jakub Vrana: https://raw.githubusercontent.com/vrana/adminer/master/plugins/tables-filter.php
+ * @author Eric Delcroix, http://github.com/ericdelcroix
  *
  */
 class AdminerTablesHide {
+	public $hiddenTables = [];
 
-	function tablesPrint($tables) {
-		$jsonTables = array();
+	public function __construct($hiddenTables = []) {
+		$this->hiddenTables = $hiddenTables;
+	}
+
+	public function getHiddenTablesForCurrentDatabase() {
+		$currentDatabase = $_GET["db"] ?? null;
+		if ($currentDatabase !== null && isset($this->hiddenTables[$currentDatabase]) && is_array($this->hiddenTables[$currentDatabase])) {
+			return $this->hiddenTables[$currentDatabase];
+		}
+
+		if (!empty($this->hiddenTables)) {
+			$firstValue = reset($this->hiddenTables);
+			if (!is_array($firstValue)) {
+				return $this->hiddenTables;
+			}
+		}
+
+		return [];
+	}
+
+	public function tablesPrint($tables) {
+		$hiddenTablesForDatabase = $this->getHiddenTablesForCurrentDatabase();
+		$jsonTables = [];
 		foreach ($tables as $table => $status) {
-		  $jsonTables[] = array(
-			'table' => $table,
-			'isView' => Adminer\is_view($status),
-			'show' => Adminer\support("table") || Adminer\support("indexes"),
-			'selected' => in_array($table, array($_GET["table"], $_GET["create"], $_GET["indexes"], $_GET["foreign"], $_GET["trigger"], $_GET["select"], $_GET["edit"], $_GET["view"])),
-			'fullTableName' => $_GET[Adminer\DRIVER]."-".$_GET["db"]."-".$table
-		  );
+		  $jsonTables[] = [
+				'table' => $table,
+				'isView' => Adminer\is_view($status),
+				'show' => Adminer\support("table") || Adminer\support("indexes"),
+				'selected' => in_array($table, [$_GET["table"] ?? null, $_GET["create"] ?? null, $_GET["indexes"] ?? null, $_GET["foreign"] ?? null, $_GET["trigger"] ?? null, $_GET["select"] ?? null, $_GET["edit"] ?? null, $_GET["view"] ?? null]),
+				'fullTableName' => ($_GET[Adminer\DRIVER] ?? '') . "-" . ($_GET["db"] ?? '') . "-" . $table
+			];
 		}
 		?>
 		<style<?php echo Adminer\nonce(); ?>>
@@ -61,11 +81,19 @@ class AdminerTablesHide {
 
 		<script<?php echo Adminer\nonce(); ?>>
 			var menuTables = <?php echo json_encode($jsonTables); ?>;
+			<?php
+			$forcedHiddenTables = [];
+			foreach ($hiddenTablesForDatabase as $table) {
+				$forcedHiddenTables[] = ($_GET[Adminer\DRIVER] ?? '') . "-" . ($_GET["db"] ?? '') . "-" . $table;
+			}
+			?>
+			var forcedHiddenTables = <?php echo json_encode($forcedHiddenTables); ?>;
+			var forcedHiddenTableNames = <?php echo json_encode(array_values($hiddenTablesForDatabase)); ?>;
 			var baseUrl = <?php echo json_encode(Adminer\ME); ?>;
 			var selectLang = <?php echo json_encode(Adminer\lang('select')); ?>;
 			var structureLang = <?php echo json_encode(Adminer\lang('Show structure')); ?>;
 			var hiddenTables = [];
-			var currentDatabase = "<?php echo $_GET[Adminer\DRIVER]."-".$_GET["db"]; ?>";
+			var currentDatabase = "<?php echo ($_GET[Adminer\DRIVER] ?? '') . "-" . ($_GET["db"] ?? ''); ?>";
 			var menuBlock = qs("#menu");
 			var tablesEl = qs("#tables");
 			/**
@@ -104,6 +132,11 @@ class AdminerTablesHide {
 			*/
 			function initTables() {
 				hiddenTables = (localStorage.getItem("adminer_tablesHide") || "").split("|").filter(function(el) {return el.length != 0});
+				for (var i = 0; i < forcedHiddenTables.length; i++) {
+					if (hiddenTables.indexOf(forcedHiddenTables[i]) < 0) {
+						hiddenTables.push(forcedHiddenTables[i]);
+					}
+				}
 				tablesEl.classList.add("hidingTablesPlugin");
 				filterTables();
 			}
@@ -194,7 +227,7 @@ class AdminerTablesHide {
 			mixin(qs(".toggleTableVisible"), {onclick: bclick});
 			mixin(qs('#tables'), {onmouseover: menuOverATH, onmouseout: menuOutATH});
 			tablesEl.addEventListener("click", function (e) {
-				var t = event.target;
+				var t = e.target;
 				var ret = true;
 				while (t && t !== this) {
 					if (t.matches("a.toggleVisible")) {
@@ -207,8 +240,28 @@ class AdminerTablesHide {
 				return ret;
 			});
 			initTables();
+
+			/**
+			 * Hide forced-hidden tables in the main content table (div.scrollable)
+			 */
+			document.addEventListener("DOMContentLoaded", function() {
+				if (forcedHiddenTableNames.length === 0) return;
+				var contentTable = document.querySelector("div.scrollable table.nowrap.checkable");
+				if (!contentTable) return;
+				var rows = contentTable.querySelectorAll("tbody tr");
+				rows.forEach(function(row) {
+					var checkbox = row.querySelector("input[name='tables[]']");
+					if (!checkbox) return;
+					var tableName = checkbox.value;
+					if (forcedHiddenTableNames.indexOf(tableName) >= 0) {
+						row.style.display = "none";
+					}
+				});
+			});
 		</script>
 		<?php
 		return true;
 	}
 }
+
+### END OF FILE
